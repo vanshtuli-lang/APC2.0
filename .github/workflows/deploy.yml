@@ -18,5 +18,6 @@ jobs:
       - name: Deploy to APC
         env:
           ASTRONOMER_KEY_SECRET: ${{ secrets.ASTRONOMER_KEY_SECRET }}
+          ASTRO_BASE_DOMAIN: demo-lab.aws.astronomer-demo.com
         run: |
           astro deploy cmppik87t16d701ld32ftjblj --force

@@ -19,6 +19,4 @@ jobs:
         env:
           ASTRO_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
         run: |
-          astro deploy cmppik87t16d701ld32ftjblj \
-            --base-domain demo-lab.aws.astronomer-demo.com \
-            --force
+          astro deploy cmppik87t16d701ld32ftjblj --force

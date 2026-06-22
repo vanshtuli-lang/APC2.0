@@ -17,7 +17,8 @@ jobs:
 
       - name: Deploy to APC
         env:
-          ASTRONOMER_KEY_ID: ${{ secrets.ASTRONOMER_KEY_ID }}
           ASTRONOMER_KEY_SECRET: ${{ secrets.ASTRONOMER_KEY_SECRET }}
-          ASTRO_BASE_DOMAIN: demo-lab.aws.astronomer-demo.com
-        run: astro deploy cmppik87t16d701ld32ftjblj --force
+        run: |
+          mkdir -p ~/.astro
+          printf 'context: demo-lab.aws.astronomer-demo.com\ncontexts:\n  demo-lab_aws_astronomer-demo_com:\n    domain: demo-lab.aws.astronomer-demo.com\n    token: %s\n    workspace: cmqiarxkc0008gz18vyojvlp4\n    last_used_workspace: cmqiarxkc0008gz18vyojvlp4\n' "$ASTRONOMER_KEY_SECRET" > ~/.astro/config.yaml
+          astro deploy cmppik87t16d701ld32ftjblj --force

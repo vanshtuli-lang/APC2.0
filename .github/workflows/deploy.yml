@@ -19,20 +19,11 @@ jobs:
         env:
           ASTRONOMER_KEY_SECRET: ${{ secrets.ASTRONOMER_KEY_SECRET }}
         run: |
+          TOKEN=$(curl -sf -X POST \
+            https://houston.demo-lab.aws.astronomer-demo.com/v1 \
+            -H 'Content-Type: application/json' \
+            -d "{\"query\":\"mutation { serviceAccountCreateToken(serviceAccountKey: \\\"$ASTRONOMER_KEY_SECRET\\\") { token } }\"}" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['serviceAccountCreateToken']['token'])")
           mkdir -p ~/.astro
-          cat <<EOF > ~/.astro/config.yaml
-          cloud:
-            api:
-              port: "443"
-              protocol: https
-              ws_protocol: wss
-            base_domain: demo-lab.aws.astronomer-demo.com
-          context: demo-lab.aws.astronomer-demo.com
-          contexts:
-            demo-lab.aws.astronomer-demo.com:
-              domain: demo-lab.aws.astronomer-demo.com
-              token: ${ASTRONOMER_KEY_SECRET}
-              workspace: cmqiarxkc0008gz18vyojvlp4
-              last_used_workspace: cmqiarxkc0008gz18vyojvlp4
-          EOF
+          printf 'context: demo-lab.aws.astronomer-demo.com\ncontexts:\n  demo-lab.aws.astronomer-demo.com:\n    domain: demo-lab.aws.astronomer-demo.com\n    token: %s\n    workspace: cmqiarxkc0008gz18vyojvlp4\n    last_used_workspace: cmqiarxkc0008gz18vyojvlp4\n' "$TOKEN" > ~/.astro/config.yaml
           astro deploy cmppik87t16d701ld32ftjblj --force

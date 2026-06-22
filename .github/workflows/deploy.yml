@@ -15,15 +15,12 @@ jobs:
       - name: Install Astro CLI
         run: curl -sSL https://install.astronomer.io | sudo bash
 
+      - name: Print CLI version
+        run: astro version
+
       - name: Deploy to APC
         env:
+          ASTRONOMER_KEY_ID: ${{ secrets.ASTRONOMER_KEY_ID }}
           ASTRONOMER_KEY_SECRET: ${{ secrets.ASTRONOMER_KEY_SECRET }}
-        run: |
-          TOKEN=$(curl -sf -X POST \
-            https://houston.demo-lab.aws.astronomer-demo.com/v1 \
-            -H 'Content-Type: application/json' \
-            -d "{\"query\":\"mutation { serviceAccountCreateToken(serviceAccountKey: \\\"$ASTRONOMER_KEY_SECRET\\\") { token } }\"}" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['serviceAccountCreateToken']['token'])")
-          mkdir -p ~/.astro
-          printf 'context: demo-lab.aws.astronomer-demo.com\ncontexts:\n  demo-lab.aws.astronomer-demo.com:\n    domain: demo-lab.aws.astronomer-demo.com\n    token: %s\n    workspace: cmqiarxkc0008gz18vyojvlp4\n    last_used_workspace: cmqiarxkc0008gz18vyojvlp4\n' "$TOKEN" > ~/.astro/config.yaml
-          astro deploy cmppik87t16d701ld32ftjblj --force
+          ASTRO_BASE_DOMAIN: demo-lab.aws.astronomer-demo.com
+        run: astro deploy cmppik87t16d701ld32ftjblj --force

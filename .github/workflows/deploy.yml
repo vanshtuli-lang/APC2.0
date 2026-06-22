@@ -21,4 +21,4 @@ jobs:
         run: |
           mkdir -p ~/.astro
           printf 'context: demo-lab.aws.astronomer-demo.com\ncontexts:\n  demo-lab_aws_astronomer-demo_com:\n    domain: demo-lab.aws.astronomer-demo.com\n    token: %s\n    workspace: cmqiarxkc0008gz18vyojvlp4\n    last_used_workspace: cmqiarxkc0008gz18vyojvlp4\n' "$ASTRONOMER_KEY_SECRET" > ~/.astro/config.yaml
-          astro deploy cmppik87t16d701ld32ftjblj --force
+          astro deploy cmqicqsnp000ae0189ixus2u3 --force

@@ -17,22 +17,8 @@ jobs:
 
       - name: Deploy to APC
         env:
+          ASTRONOMER_KEY_ID: ${{ secrets.ASTRONOMER_KEY_ID }}
           ASTRONOMER_KEY_SECRET: ${{ secrets.ASTRONOMER_KEY_SECRET }}
+          ASTRO_BASE_DOMAIN: demo-lab.aws.astronomer-demo.com
         run: |
-          mkdir -p ~/.astro
-          cat <<EOF > ~/.astro/config.yaml
-          cloud:
-            api:
-              port: "443"
-              protocol: https
-              ws_protocol: wss
-            base_domain: demo-lab.aws.astronomer-demo.com
-          context: demo-lab.aws.astronomer-demo.com
-          contexts:
-            demo-lab.aws.astronomer-demo.com:
-              domain: demo-lab.aws.astronomer-demo.com
-              token: ${ASTRONOMER_KEY_SECRET}
-              workspace: cmqiarxkc0008gz18vyojvlp4
-              last_used_workspace: cmqiarxkc0008gz18vyojvlp4
-          EOF
           astro deploy cmppik87t16d701ld32ftjblj --force

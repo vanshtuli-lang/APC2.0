@@ -88,7 +88,7 @@ def example_astronauts():
         craft = person_in_space["craft"]
         name = person_in_space["name"]
 
-        print(f"{name} is currently in space flying on the (NEWDAG EVEN NEWER) {craft}! {greeting}")
+        print(f"{name} is currently in space flying on the (NEWDAG EVEN NEWER EVEN NEWER PART2) {craft}! {greeting}")
 
     # Use dynamic task mapping to run the print_astronaut_craft task for each
     # Astronaut in space

@@ -44,6 +44,7 @@ def example_astronauts():
     )  # Define that this task updates the `current_astronauts` Asset
     def get_astronauts(**context) -> list[dict]:
         """
+
         This task uses the requests library to retrieve a list of Astronauts
         currently in space. The results are pushed to XCom with a specific key
         so they can be used in a downstream pipeline. The task returns a list

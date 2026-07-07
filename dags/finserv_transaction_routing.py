@@ -17,7 +17,6 @@ from decimal import Decimal
 from typing import Any
 
 from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
-from airflow.providers.standard.operators.python import BranchPythonOperator
 from airflow.sdk import Variable, dag, get_current_context, task
 from pendulum import datetime as pendulum_datetime
 
@@ -45,15 +44,6 @@ def _normalize_records(columns: list[str], rows: list[tuple]) -> list[dict[str, 
         {column.lower(): _json_safe(value) for column, value in zip(columns, row)}
         for row in rows
     ]
-
-
-def _routes_from_xcom() -> dict[str, list[dict[str, Any]]]:
-    context = get_current_context()
-    return context["ti"].xcom_pull(task_ids="evaluate_routing_rules", key="routes") or {
-        "compliance": [],
-        "vip": [],
-        "standard": [],
-    }
 
 
 def _post_webhook(variable_key: str, payload: dict[str, Any]) -> str:
@@ -125,43 +115,13 @@ def _insert_payload_rows(table_name: str, transactions: list[dict[str, Any]], st
     print(f"Batch MERGE committed via hook.run() — {len(transactions)} rows → {table_name}")
 
 
-def evaluate_routing_rules_callable(**context) -> list[str]:
-    transactions = context["ti"].xcom_pull(task_ids="fetch_transactions") or []
-    vip_amount_threshold = Decimal(str(context["params"]["vip_amount_threshold"]))
-
-    routes = {"compliance": [], "vip": [], "standard": []}
-
-    for transaction in transactions:
-        is_flagged = str(transaction.get("flagged", "N")).upper() == "Y"
-        amount = Decimal(str(transaction.get("amount") or "0"))
-
-        if is_flagged:
-            routes["compliance"].append(transaction)
-        elif amount > vip_amount_threshold:
-            routes["vip"].append(transaction)
-        else:
-            routes["standard"].append(transaction)
-
-    context["ti"].xcom_push(key="routes", value=routes)
-
-    selected_paths = []
-    if routes["compliance"]:
-        selected_paths.append("route_to_compliance")
-    if routes["vip"]:
-        selected_paths.append("route_to_vip")
-    if routes["standard"] or not selected_paths:
-        selected_paths.append("standard_db_load")
-
-    return selected_paths
-
-
 @dag(
     dag_id="finserv_real_time_transaction_routing",
     start_date=pendulum_datetime(2026, 6, 27, tz="America/New_York"),
     schedule="*/5 * * * *",
     catchup=False,
     max_active_runs=1,
-    default_args={"owner": "finserv-operations", "retries": 1},
+    default_args={"owner": "finserv-operations", "retries": 2},
     tags=["finserv", "snowflake", "compliance", "vip-routing", "operations"],
     doc_md=__doc__,
     params={
@@ -211,14 +171,30 @@ def finserv_real_time_transaction_routing() -> None:
         ]
         return _normalize_records(columns, rows)
 
-    evaluate_routing_rules = BranchPythonOperator(
-        task_id="evaluate_routing_rules",
-        python_callable=evaluate_routing_rules_callable,
-    )
+    @task
+    def evaluate_routing_rules(
+        transactions: list[dict[str, Any]],
+    ) -> dict[str, list[dict[str, Any]]]:
+        context = get_current_context()
+        vip_amount_threshold = Decimal(str(context["params"]["vip_amount_threshold"]))
+
+        routes: dict[str, list[dict[str, Any]]] = {"compliance": [], "vip": [], "standard": []}
+        for transaction in transactions:
+            is_flagged = str(transaction.get("flagged", "N")).upper() == "Y"
+            amount = Decimal(str(transaction.get("amount") or "0"))
+
+            if is_flagged:
+                routes["compliance"].append(transaction)
+            elif amount > vip_amount_threshold:
+                routes["vip"].append(transaction)
+            else:
+                routes["standard"].append(transaction)
+
+        return routes
 
     @task
-    def route_to_compliance() -> dict[str, Any]:
-        transactions = _routes_from_xcom()["compliance"]
+    def route_to_compliance(routes: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        transactions = routes["compliance"]
         if not transactions:
             return {"routed": 0, "path": "compliance"}
 
@@ -244,18 +220,19 @@ def finserv_real_time_transaction_routing() -> None:
         }
 
     @task
-    def route_to_vip() -> dict[str, Any]:
-        transactions = _routes_from_xcom()["vip"]
+    def route_to_vip(routes: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        transactions = routes["vip"]
         if not transactions:
             return {"routed": 0, "path": "vip"}
 
+        vip_amount_threshold = get_current_context()["params"]["vip_amount_threshold"]
         notification_status = _post_webhook(
             VIP_WEBHOOK_VARIABLE,
             {
                 "title": "High-Value Transaction Alert: VIP Service Review",
                 "priority": "P2",
                 "transaction_count": len(transactions),
-                "threshold": "{{ params.vip_amount_threshold }}",
+                "threshold": vip_amount_threshold,
                 "transactions": transactions,
             },
         )
@@ -267,8 +244,8 @@ def finserv_real_time_transaction_routing() -> None:
         }
 
     @task
-    def standard_db_load() -> dict[str, Any]:
-        transactions = _routes_from_xcom()["standard"]
+    def standard_db_load(routes: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+        transactions = routes["standard"]
         if not transactions:
             return {"routed": 0, "path": "standard"}
 
@@ -280,9 +257,10 @@ def finserv_real_time_transaction_routing() -> None:
 
         return {"routed": len(transactions), "path": "standard"}
 
-    transactions = fetch_transactions()
-    transactions >> evaluate_routing_rules
-    evaluate_routing_rules >> [route_to_compliance(), route_to_vip(), standard_db_load()]
+    routes = evaluate_routing_rules(fetch_transactions())
+    route_to_compliance(routes)
+    route_to_vip(routes)
+    standard_db_load(routes)
 
 
 finserv_real_time_transaction_routing()

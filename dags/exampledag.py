@@ -36,6 +36,8 @@ import requests
     default_args={"owner": "Astro", "retries": 3},
     tags=["example"],
 )
+
+
 def example_astronauts():
     # Define tasks
     @task(

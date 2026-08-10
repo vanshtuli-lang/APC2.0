@@ -230,7 +230,7 @@ print("\\nMetrics written to XCom.")
         ],
         container_resources=k8s.V1ResourceRequirements(
             requests={"nvidia.com/gpu": "1", "cpu": "2", "memory": "8Gi"},
-            limits={"nvidia.com/gpu": "1", "cpu": "4", "memory": "14Gi"},
+            limits={"nvidia.com/gpu": "1", "cpu": "3", "memory": "12Gi"},
         ),
         get_logs=True,
         is_delete_operator_pod=True,

@@ -154,6 +154,7 @@ annual_vol = [0.22,   0.28,   0.25,   0.20,   0.22  ]
 PORT_VAL   = 10_000_000
 N_SIM      = 1_000_000
 N_DAYS     = 252
+BATCH      = 100_000   # 100k paths/batch → peak VRAM ~1.5 GB vs ~15 GB unbatched
 
 w     = torch.tensor(weights, device=device)
 mu    = torch.tensor([r / N_DAYS for r in annual_ret], device=device)
@@ -170,20 +171,24 @@ cpu_10k = time.time() - t0
 cpu_est = cpu_10k * 100
 print(f"  10k paths : {cpu_10k:.2f}s  →  1M paths est: {cpu_est:.0f}s on CPU")
 
-# GPU — 1M paths
-print(f"\\nGPU: running {N_SIM:,} paths...")
+# GPU — 1M paths, batched to stay within T4 VRAM
+print(f"\\nGPU: running {N_SIM:,} paths in {N_SIM // BATCH} batches of {BATCH:,}...")
 torch.cuda.synchronize()
 t0 = time.time()
 
-Z          = torch.randn(N_SIM, N_DAYS, len(tickers), device=device)
-daily_ret  = mu + sigma * Z
-port_daily = (daily_ret * w).sum(dim=-1)
-port_paths = PORT_VAL * (1 + port_daily).cumprod(dim=1)
-final_vals = port_paths[:, -1]
-pct_ret    = (final_vals - PORT_VAL) / PORT_VAL
+final_vals_list = []
+for _ in range(N_SIM // BATCH):
+    Z          = torch.randn(BATCH, N_DAYS, len(tickers), device=device)
+    daily_ret  = mu + sigma * Z;  del Z
+    port_daily = (daily_ret * w).sum(dim=-1);  del daily_ret
+    port_paths = PORT_VAL * (1 + port_daily).cumprod(dim=1);  del port_daily
+    final_vals_list.append(port_paths[:, -1].cpu());  del port_paths
 
 torch.cuda.synchronize()
 gpu_time   = time.time() - t0
+
+final_vals = torch.cat(final_vals_list)
+pct_ret    = (final_vals - PORT_VAL) / PORT_VAL
 
 print(f"  {N_SIM:,} paths : {gpu_time:.2f}s")
 print(f"  Speedup        : {cpu_est/gpu_time:.0f}x faster than CPU")

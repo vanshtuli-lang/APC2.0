@@ -29,9 +29,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from airflow.decorators import dag, task
-from airflow.models.asset import Asset
 from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from airflow.sdk import Asset, dag, task
 from kubernetes.client import models as k8s
 
 

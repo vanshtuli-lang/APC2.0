@@ -34,11 +34,11 @@ from airflow.sdk import Asset, dag, task
 from kubernetes.client import models as k8s
 
 
-# ── Assets ────────────────────────────────────────────────────────────────────
+# Assets (not real)
 MARKET_DATA = Asset("s3://finserv-datalake/market-data/daily/")
 RISK_REPORT = Asset("s3://finserv-reports/portfolio-risk/latest/")
 
-# ── GPU Node Config ───────────────────────────────────────────────────────────
+# GPU info
 GPU_ASG_NAME = "eks-gpu-nodes-82cff5dd-545e-6906-54fe-782a969ffabd"
 AWS_REGION   = "us-east-1"
 
@@ -55,7 +55,7 @@ VAR_ALERT_THRESHOLD_PCT = 8.0
 )
 def portfolio_risk_simulation():
 
-    # ── Setup: Provision GPU Node ─────────────────────────────────────────────
+    # provision the GPU:
     # Scales the GPU node group from 0 → 1 and waits until the node is Ready.
     # Runs before everything else. If it fails, the pipeline is skipped cleanly.
     # The paired teardown always runs at the end — GPU never left idle.
@@ -87,7 +87,7 @@ def portfolio_risk_simulation():
 
         raise Exception("GPU node did not become Ready within 8 minutes")
 
-    # ── Teardown: Deprovision GPU Node ────────────────────────────────────────
+    # Teardown GPU to avoid costs
     # Always runs — even if training or evaluation fails.
     # Guarantees the GPU node is never left running idle.
     @task
@@ -99,7 +99,7 @@ def portfolio_risk_simulation():
         )
         print("GPU node scaled to 0 — no idle GPU costs")
 
-    # ── Task 1: Define Portfolio ──────────────────────────────────────────────
+    # hardcoded ticker portolio
     # In production: pull live positions from the portfolio management system.
     @task(inlets=[MARKET_DATA])
     def prepare_portfolio() -> dict:
@@ -107,11 +107,8 @@ def portfolio_risk_simulation():
             "name": "FinServ Core Fund",
             "value_usd": 10_000_000,
             "holdings": {
-                "JPM": {"weight": 0.30, "annual_return": 0.12, "annual_vol": 0.22},
-                "GS":  {"weight": 0.20, "annual_return": 0.15, "annual_vol": 0.28},
-                "BAC": {"weight": 0.20, "annual_return": 0.09, "annual_vol": 0.25},
-                "V":   {"weight": 0.15, "annual_return": 0.18, "annual_vol": 0.20},
-                "MA":  {"weight": 0.15, "annual_return": 0.20, "annual_vol": 0.22},
+                "JPM": {"weight": 0.50, "annual_return": 0.12, "annual_vol": 0.22},
+                "GS":  {"weight": 0.50, "annual_return": 0.15, "annual_vol": 0.28},
             },
             "time_horizon_days": 252,
             "n_simulations": 1_000_000,
@@ -126,7 +123,7 @@ def portfolio_risk_simulation():
               f"over {portfolio['time_horizon_days']} trading days")
         return portfolio
 
-    # ── Task 2: Monte Carlo on GPU ────────────────────────────────────────────
+    # Monte Carlo Task - running on K8 POD operator inside the GPU
     run_monte_carlo = KubernetesPodOperator(
         task_id="run_monte_carlo_on_gpu",
         name="portfolio-risk-simulation",
@@ -134,7 +131,7 @@ def portfolio_risk_simulation():
         image="pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime",
         cmds=["python", "-c"],
         arguments=["""
-import torch, numpy as np, time, json, os
+import torch, time, json, os
 
 print("=" * 58)
 print("  PORTFOLIO RISK SIMULATION — GPU POD")
@@ -147,10 +144,10 @@ if torch.cuda.is_available():
 print("=" * 58)
 
 # Portfolio parameters
-tickers    = ["JPM",  "GS",   "BAC",  "V",    "MA"  ]
-weights    = [0.30,   0.20,   0.20,   0.15,   0.15  ]
-annual_ret = [0.12,   0.15,   0.09,   0.18,   0.20  ]
-annual_vol = [0.22,   0.28,   0.25,   0.20,   0.22  ]
+tickers    = ["JPM",  "GS"  ]
+weights    = [0.50,   0.50  ]
+annual_ret = [0.12,   0.15  ]
+annual_vol = [0.22,   0.28  ]
 PORT_VAL   = 10_000_000
 N_SIM      = 1_000_000
 N_DAYS     = 252
@@ -159,17 +156,6 @@ BATCH      = 100_000   # 100k paths/batch → peak VRAM ~1.5 GB vs ~15 GB unbatc
 w     = torch.tensor(weights, device=device)
 mu    = torch.tensor([r / N_DAYS for r in annual_ret], device=device)
 sigma = torch.tensor([v / N_DAYS**0.5 for v in annual_vol], device=device)
-
-# CPU baseline — 10k paths so we can show the speedup live
-print("\\nCPU baseline (10k paths)...")
-t0 = time.time()
-Z_cpu   = np.random.randn(10_000, N_DAYS, len(tickers))
-r_cpu   = np.array(annual_ret)/N_DAYS + np.array(annual_vol)/N_DAYS**0.5 * Z_cpu
-pf_cpu  = (r_cpu * weights).sum(axis=-1)
-_       = PORT_VAL * np.cumprod(1 + pf_cpu, axis=1)[:, -1]
-cpu_10k = time.time() - t0
-cpu_est = cpu_10k * 100
-print(f"  10k paths : {cpu_10k:.2f}s  →  1M paths est: {cpu_est:.0f}s on CPU")
 
 # GPU — 1M paths, batched to stay within T4 VRAM
 print(f"\\nGPU: running {N_SIM:,} paths in {N_SIM // BATCH} batches of {BATCH:,}...")
@@ -191,7 +177,6 @@ final_vals = torch.cat(final_vals_list)
 pct_ret    = (final_vals - PORT_VAL) / PORT_VAL
 
 print(f"  {N_SIM:,} paths : {gpu_time:.2f}s")
-print(f"  Speedup        : {cpu_est/gpu_time:.0f}x faster than CPU")
 
 # Risk metrics
 var_95_pct = float(torch.quantile(pct_ret, 0.05)) * 100
@@ -223,7 +208,6 @@ with open("/airflow/xcom/return.json", "w") as f:
         "sharpe_ratio":    round(sharpe, 2),
         "prob_loss_pct":   round(prob_loss, 1),
         "gpu_time_sec":    round(gpu_time, 2),
-        "speedup_vs_cpu":  round(cpu_est / gpu_time, 0),
         "n_simulations":   N_SIM,
     }, f)
 print("\\nMetrics written to XCom.")
@@ -244,7 +228,7 @@ print("\\nMetrics written to XCom.")
         startup_timeout_seconds=300,
     )
 
-    # ── Task 3: Risk Gate ─────────────────────────────────────────────────────
+    # Logical risk gate - logic specific
     @task.branch
     def risk_gate(metrics: dict) -> str:
         var = metrics["var_95_pct"]
@@ -255,19 +239,18 @@ print("\\nMetrics written to XCom.")
         print("VaR within limits — filing report")
         return "file_report"
 
-    # ── Task 4a: File Report ──────────────────────────────────────────────────
+    # log everything
     @task(outlets=[RISK_REPORT])
     def file_report(metrics: dict) -> None:
         print("Filing daily risk report...")
         print(f"  Portfolio       : FinServ Core Fund ($10,000,000)")
         print(f"  Simulations     : {metrics['n_simulations']:,} in {metrics['gpu_time_sec']}s")
-        print(f"  GPU speedup     : {metrics['speedup_vs_cpu']:.0f}x vs CPU")
         print(f"  Expected Return : +{metrics['expected_return']:.2f}%")
         print(f"  Sharpe Ratio    : {metrics['sharpe_ratio']:.2f}")
         print(f"  VaR 95% (1yr)   : {metrics['var_95_pct']:.2f}%  (${metrics['var_95_usd']:,.0f})")
         print("Report saved — downstream compliance DAG will trigger")
 
-    # ── Task 4b: Raise Alert ──────────────────────────────────────────────────
+    # raise alert - still printing to logs
     @task
     def raise_alert(metrics: dict) -> None:
         print("RISK ALERT: VaR exceeds acceptable threshold")
@@ -275,7 +258,7 @@ print("\\nMetrics written to XCom.")
         print(f"  USD at risk: ${metrics['var_95_usd']:,.0f}")
         print("  Notifying risk committee + flagging for rebalancing")
 
-    # ── Wire ──────────────────────────────────────────────────────────────────
+    # dependency graph
     setup    = provision_gpu_node()
     teardown = deprovision_gpu_node()
     portfolio = prepare_portfolio()

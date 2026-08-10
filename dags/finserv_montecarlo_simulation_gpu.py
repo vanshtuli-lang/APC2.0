@@ -241,7 +241,6 @@ print("\\nMetrics written to XCom.")
         is_delete_operator_pod=True,
         in_cluster=True,
         do_xcom_push=True,
-        xcom_sidecar_container_image="python:3.12-slim",  # GNU pgrep — fixes BusyBox -u flag
         startup_timeout_seconds=300,
     )
 

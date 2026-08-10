@@ -59,7 +59,7 @@ def portfolio_risk_simulation():
     # Scales the GPU node group from 0 → 1 and waits until the node is Ready.
     # Runs before everything else. If it fails, the pipeline is skipped cleanly.
     # The paired teardown always runs at the end — GPU never left idle.
-    @task.setup
+    @task
     def provision_gpu_node() -> None:
         import boto3, time
         from kubernetes import client as k8s_client, config as k8s_config
@@ -90,7 +90,7 @@ def portfolio_risk_simulation():
     # ── Teardown: Deprovision GPU Node ────────────────────────────────────────
     # Always runs — even if training or evaluation fails.
     # Guarantees the GPU node is never left running idle.
-    @task.teardown
+    @task
     def deprovision_gpu_node() -> None:
         import boto3
         boto3.client("autoscaling", region_name=AWS_REGION).set_desired_capacity(
@@ -277,6 +277,9 @@ print("\\nMetrics written to XCom.")
     gate     = risk_gate(run_monte_carlo.output)
     report   = file_report(run_monte_carlo.output)
     alert    = raise_alert(run_monte_carlo.output)
+
+    setup.as_setup()
+    teardown.as_teardown(setups=setup)
 
     setup >> portfolio >> run_monte_carlo >> gate >> [report, alert] >> teardown
 
